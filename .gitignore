@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Data directories (keep .gitkeep, ignore everything else)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Run artifacts (keep .gitkeep, ignore everything else)
+runs/*
+!runs/.gitkeep
