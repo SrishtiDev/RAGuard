@@ -13,6 +13,8 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+!data/processed/splits/
+!data/processed/splits/**
 
 # Run artifacts (keep .gitkeep, ignore everything else)
 runs/*
