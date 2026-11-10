@@ -9,9 +9,24 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+class DetectorInput(BaseModel):
+    """
+    Leakage-safe input container for detectors.
+    Exposes strictly the textual information required for inference,
+    completely stripped of labels, spans, or metadata.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    query: Optional[str] = None
+    context: str
+    context_chunks: Optional[list[str]] = None
+    response: str
 
 
 class Span(BaseModel):
@@ -94,3 +109,17 @@ class Example(BaseModel):
                 mismatches,
             )
         return self
+
+    def to_detector_input(self) -> DetectorInput:
+        """
+        Convert this Example into a leakage-safe DetectorInput.
+        Exposes strictly: id, query, context, context_chunks, response.
+        """
+        return DetectorInput(
+            id=self.id,
+            query=self.query,
+            context=self.context,
+            context_chunks=self.context_chunks,
+            response=self.response,
+        )
+
