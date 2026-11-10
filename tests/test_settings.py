@@ -23,11 +23,11 @@ from configs.settings import Settings, get_settings  # noqa: E402
 # ---------------------------------------------------------------------------
 
 _REQUIRED_VARS = {
-    "GENERATOR_MODEL": "gpt-test",
+    "GENERATOR_MODEL": "test-model",
     "JUDGE_MODEL": "judge-test",
     "NLI_MODEL": "nli-test",
     "EMBEDDING_MODEL": "embed-test",
-    "LLM_API_KEY": "sk-test-key-abc123",
+    "LLM_API_KEY": "test-api-key",
     "LLM_BASE_URL": "https://api.test.example.com/v1",
 }
 
@@ -76,11 +76,11 @@ class TestSettingsHappyPath:
 
         s = Settings()
 
-        assert s.GENERATOR_MODEL == "gpt-test"
+        assert s.GENERATOR_MODEL == "test-model"
         assert s.JUDGE_MODEL == "judge-test"
         assert s.NLI_MODEL == "nli-test"
         assert s.EMBEDDING_MODEL == "embed-test"
-        assert s.LLM_API_KEY.get_secret_value() == "sk-test-key-abc123"
+        assert s.LLM_API_KEY.get_secret_value() == "test-api-key"
         assert s.LLM_BASE_URL == "https://api.test.example.com/v1"
         assert s.RANDOM_SEED == 42
 
@@ -125,7 +125,7 @@ class TestSettingsSecurity:
         s = Settings()
 
         # The key value must not appear in repr
-        assert "sk-test-key-abc123" not in repr(s)
+        assert "test-api-key" not in repr(s)
 
     def test_to_loggable_dict_does_not_contain_api_key(self, monkeypatch):
         """to_loggable_dict() must not include LLM_API_KEY at all."""
@@ -135,4 +135,4 @@ class TestSettingsSecurity:
         loggable = s.to_loggable_dict()
 
         assert "LLM_API_KEY" not in loggable
-        assert "sk-test-key-abc123" not in loggable.values()
+        assert "test-api-key" not in loggable.values()

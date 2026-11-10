@@ -213,7 +213,7 @@ To evaluate whether multi-signal diagnosis and routing justify their overhead, R
 
 | Component | Technology | Role |
 |---|---|---|
-| **Language & Core** | Python 3.11 | Core implementation language |
+| **Language & Core** | Python 3.11+ (tested on 3.12) | Core implementation language |
 | **Data Validation & Config** | Pydantic v2, pydantic-settings | Strict environment configuration & schema enforcement |
 | **API Layer** | FastAPI | Verification middleware service endpoints |
 | **Sparse Retrieval** | `rank_bm25` | Lexical retrieval component |
@@ -225,7 +225,7 @@ To evaluate whether multi-signal diagnosis and routing justify their overhead, R
 | **Visualization & Reporting** | matplotlib | ROC/PR curves and diagnostic confusion matrices |
 | **Demo User Interface** | Next.js, TypeScript (Optional) | Interactive comparison interface |
 
-*All model identifiers and API credentials must be supplied exclusively through environment variables (see `.env.example`); no model names or credentials may be hardcoded.*
+Model names and keys are read from environment variables; test fixtures use neutral dummy values.
 
 ### Build Order
 1. **Evaluation harness & datasets:** Exploration, dataset loaders, and benchmark metric definitions.
@@ -244,12 +244,12 @@ To evaluate whether multi-signal diagnosis and routing justify their overhead, R
 
 ```text
 .
-├── api/                    # FastAPI application and service endpoints
+├── api/                    # API layer and service endpoints
 │   ├── __init__.py
-│   └── main.py
+│   └── main.py             # (placeholder, not implemented)
 ├── claims/                 # Atomic claim segmentation and decomposition
 │   ├── __init__.py
-│   └── splitter.py
+│   └── splitter.py         # (placeholder, not implemented)
 ├── configs/                # Typed configuration and environment settings
 │   ├── __init__.py
 │   └── settings.py
@@ -258,37 +258,37 @@ To evaluate whether multi-signal diagnosis and routing justify their overhead, R
 │   └── raw/                # Downloaded raw corpora (RAGTruth, HaluEval)
 ├── detectors/              # Individual verification signal detectors
 │   ├── __init__.py
-│   ├── attribution.py      # Embedding cosine similarity detector
-│   ├── base.py             # Abstract base detector interface
-│   ├── consistency.py      # Self-consistency resampled similarity detector
-│   └── nli.py              # Cross-encoder NLI entailment detector
+│   ├── attribution.py      # Embedding cosine similarity detector (placeholder, not implemented)
+│   ├── base.py             # Abstract base detector interface (placeholder, not implemented)
+│   ├── consistency.py      # Self-consistency resampled similarity detector (placeholder, not implemented)
+│   └── nli.py              # Cross-encoder NLI entailment detector (placeholder, not implemented)
 ├── docs/                   # Architectural notes and dataset schema documentation
 │   └── dataset_schema.md
 ├── eval/                   # Benchmarking harness, dataset loaders, and metrics
 │   ├── __init__.py
-│   ├── datasets.py         # Dataset loading and adapter implementations
-│   ├── harness.py          # Benchmark runner and execution harness
-│   ├── logger.py           # Experiment logging and artifact tracking
-│   ├── metrics.py          # Detection and mitigation metrics definitions
-│   └── splits.py           # Dataset split definitions and utilities
+│   ├── datasets.py         # Dataset loading and adapter implementations (placeholder, not implemented)
+│   ├── harness.py          # Benchmark runner and execution harness (placeholder, not implemented)
+│   ├── logger.py           # Experiment logging and artifact tracking (placeholder, not implemented)
+│   ├── metrics.py          # Detection and mitigation metrics definitions (placeholder, not implemented)
+│   └── splits.py           # Dataset split definitions and utilities (placeholder, not implemented)
 ├── fusion/                 # Score fusion and weight calibration
 │   ├── __init__.py
-│   └── fusion.py
+│   └── fusion.py           # Score fusion and weight calibration (placeholder, not implemented)
 ├── generation/             # LLM generation clients and prompt templates
 │   ├── __init__.py
-│   ├── llm_client.py       # OpenAI-compatible API client wrapper
-│   └── prompts.py          # Generation, grounding, and reformulation prompts
+│   ├── llm_client.py       # OpenAI-compatible API client wrapper (placeholder, not implemented)
+│   └── prompts.py          # Generation, grounding, and reformulation prompts (placeholder, not implemented)
 ├── notebooks/              # Exploratory data analysis and experimental scratchpads
 ├── retrieval/              # Sparse, dense, and hybrid retrieval modules
 │   ├── __init__.py
-│   ├── bm25.py             # BM25 lexical retriever implementation
-│   ├── dense.py            # Dense embedding retriever implementation
-│   ├── retriever.py        # Unified hybrid retriever interface
-│   └── rrf.py              # Reciprocal Rank Fusion implementation
+│   ├── bm25.py             # BM25 lexical retriever implementation (placeholder, not implemented)
+│   ├── dense.py            # Dense embedding retriever implementation (placeholder, not implemented)
+│   ├── retriever.py        # Unified hybrid retriever interface (placeholder, not implemented)
+│   └── rrf.py              # Reciprocal Rank Fusion implementation (placeholder, not implemented)
 ├── router/                 # Failure diagnosis and corrective action routing
 │   ├── __init__.py
-│   ├── diagnosis.py        # Signal pattern diagnostic logic
-│   └── router.py           # Corrective routing and retry loop executor
+│   ├── diagnosis.py        # Signal pattern diagnostic logic (placeholder, not implemented)
+│   └── router.py           # Corrective routing and retry loop executor (placeholder, not implemented)
 ├── runs/                   # Experiment artifacts, run metadata, and evaluation outputs
 ├── scripts/                # Standalone data acquisition and exploration scripts
 │   └── explore_datasets.py
@@ -311,16 +311,15 @@ Components are classified strictly according to current repository state (execut
 |---|---|---|
 | **Repository structure** | **Done** | Complete package structure and directories established |
 | **Config / settings** | **Done** | Typed `pydantic-settings` loader in `configs/settings.py` with passing unit tests |
-| **Dataset exploration** | **Done** | RAGTruth and HaluEval downloaded, explored via `scripts/explore_datasets.py`, schema documented in `docs/dataset_schema.md` |
-| **Dataset loaders** | **Not started** | Placeholder exists (`eval/datasets.py`); loaders to be implemented |
-| **Evaluation harness** | **Not started** | Placeholder exists (`eval/harness.py`, `eval/metrics.py`) |
-| **Baseline RAG** | **Not started** | Placeholders exist in `retrieval/` and `generation/` |
-| **Claim splitter** | **Not started** | Placeholder exists (`claims/splitter.py`) |
-| **NLI detector** | **Not started** | Placeholder exists (`detectors/nli.py`) |
-| **Attribution detector** | **Not started** | Placeholder exists (`detectors/attribution.py`) |
-| **Consistency detector** | **Not started** | Placeholder exists (`detectors/consistency.py`) |
-| **Score fusion** | **Not started** | Placeholder exists (`fusion/fusion.py`) |
-| **Action router** | **Not started** | Placeholder exists (`router/router.py`, `router/diagnosis.py`) |
+| **docs/dataset_schema.md** | **Partial: label semantics, gaps, license, open questions pending** | Initial exploration documented; label semantics, gaps, license, open questions pending |
+| **API layer** | **Not started** | Placeholder exists (`api/main.py`); service endpoints not implemented |
+| **Retrieval** | **Not started** | Placeholders exist in `retrieval/` (`bm25.py`, `dense.py`, `retriever.py`, `rrf.py`) |
+| **Generation** | **Not started** | Placeholders exist in `generation/` (`llm_client.py`, `prompts.py`) |
+| **Claims** | **Not started** | Placeholder exists (`claims/splitter.py`); claim segmentation not implemented |
+| **Detectors** | **Not started** | Placeholders exist in `detectors/` (`attribution.py`, `base.py`, `consistency.py`, `nli.py`) |
+| **Fusion** | **Not started** | Placeholder exists (`fusion/fusion.py`); score aggregation not implemented |
+| **Router** | **Not started** | Placeholders exist in `router/` (`diagnosis.py`, `router.py`) |
+| **Eval** | **Not started** | Placeholders exist in `eval/` (`datasets.py`, `harness.py`, `logger.py`, `metrics.py`, `splits.py`) |
 | **Custom dataset** | **Not started** | Failure-archetype dataset to be collected and annotated |
 | **Experiments** | **Not started** | Awaiting harness and detector implementations |
 | **Demo UI** | **Not started** | Frontend interface not yet initialized |
@@ -331,7 +330,7 @@ Components are classified strictly according to current repository state (execut
 ## 8. Setup & Getting Started
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.11+ (tested on 3.12)
 - Git
 
 ### Installation
@@ -378,9 +377,9 @@ The following commands currently execute and pass in the repository:
 
 ### Institution & Team
 - **Academic Context:** Final-Year B.Tech Major Project, Department of Computer Science & Engineering, ABES Engineering College, Ghaziabad.
-- **Team Members:** [PLACEHOLDER: names]
-- **Project Guide:** [PLACEHOLDER: guide name]
-- **Target:** Peer-reviewed conference / journal research publication.
+- **Team Members:** Srishti Rawat , Samvika Singh , Sanskar Sahu
+- **Project Guide:** Mr.Gaurav Vats
+- **Target:**  Research paper Review, and publish it in a journal.
 
 ### References
 - **HaluEval:** Li et al., "HaluEval: A Large-Scale Hallucination Evaluation Benchmark for Large Language Models", *EMNLP 2023*.

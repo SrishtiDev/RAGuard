@@ -17,3 +17,6 @@ data/processed/*
 # Run artifacts (keep .gitkeep, ignore everything else)
 runs/*
 !runs/.gitkeep
+
+# Exploration outputs
+docs/exploration_output.txt
