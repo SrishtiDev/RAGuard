@@ -27,7 +27,7 @@ All findings documented below are derived directly and exclusively from running 
 | `source_id` | `str` | Unique source identifier (numeric string, e.g. `"15592"`, `"15593"`) |
 | `task_type` | `str` | Task category: `"Data2txt"`, `"QA"`, or `"Summary"` |
 | `source` | `str` | Provenance corpus name: `"CNN/DM"`, `"MARCO"`, `"Recent News"`, `"Yelp"` |
-| `source_info` | `str` | Retrieved reference context / passage text used to ground the generation |
+| `source_info` | `str` or `dict` | Retrieved reference context: plain `str` for `Summary`; `dict` with `['question', 'passages']` for `QA`; `dict` of business metadata and reviews for `Data2txt` |
 | `prompt` | `str` | The exact prompt instructed to the generation LLM |
 
 #### Task Type Distribution
@@ -44,9 +44,12 @@ All findings documented below are derived directly and exclusively from running 
 - **Total:** 2,965
 
 #### Context / Passage Shape & Location
-The retrieval context resides entirely in the `source_info` field as a plain text `str` (ranging from news articles in `Summary`, web passages in MS MARCO `QA`, to structured business review text/metadata in `Data2txt`).
+The retrieval context structure in `source_info` is polymorphic and depends strictly on `task_type`:
+- **`Summary` (943 records):** `source_info` is a plain text `str` containing the full article text.
+- **`QA` (989 records):** `source_info` is a `dict` with keys `['question', 'passages']`. Both values are `str`. The `passages` field is a single concatenated `str` of retrieved passages separated by double newlines (e.g. `"passage 1:... \n\npassage 2:... \n\n"`), NOT a list.
+- **`Data2txt` (1,033 records):** `source_info` is a `dict` containing structured Yelp attributes and customer reviews with 9 keys: `['name', 'address', 'city', 'state', 'categories', 'hours', 'attributes', 'business_stars', 'review_info']`.
 
-#### Example Record (`source_id = "15592"`)
+#### Example Summary Record (`source_id = "15592"`)
 ```json
 {
   "source_id": "15592",
@@ -54,6 +57,20 @@ The retrieval context resides entirely in the `source_info` field as a plain tex
   "source": "CNN/DM",
   "source_info": "Seventy years ago, Anne Frank died of typhus in a Nazi concentration camp at the age of 15. Just two weeks after her supposed death on March 31, 1945, the Bergen-Belsen concentration camp where she had been imprisoned was liberated -- timing that showed how close the Jewish diarist had been to surviving the Holocaust. But new research released by the Anne Frank House shows that Anne and her older sister, Margot Frank, died at least a month earlier than previously thought. Researchers re-examined archives of the Red Cross, the International Tracing Service and the Bergen-Belsen Memorial, along with testimonies of survivors, the Anne Frank House said Tuesday. They concluded that Anne and Margot probably died in February 1945...",
   "prompt": "Summarize the following news within 116 words:\nSeventy years ago, Anne Frank died of typhus in a Nazi concentration camp at the age of 15. Just two weeks after her supposed death on March 31, 1945, the Bergen-Belsen concentration camp where she had been imprisoned was liberated -- timing that showed how close the Jewish diarist had been to surviving the Holocaust..."
+}
+```
+
+#### Example QA Record (`source_id = "14292"`)
+```json
+{
+  "source_id": "14292",
+  "task_type": "QA",
+  "source": "MARCO",
+  "source_info": {
+    "question": "butcher shop phone number",
+    "passages": "passage 1:Butcher Shop - Hayward 826 B Street, Hayward CA 94541 Phone Number: (510) 889-8690\n\npassage 2:Butcher Shop - Lakefield 212 Main Street, Lakefield MN 56150 Phone Number: (507) 662-6281\n\npassage 3:Some More Phone Numbers Related To The Butcher Shop The Local Butcher Shop phone number : (510) 845-6328 Boones Butcher Shop phone number : (502) 348-3668 Ye Ole Butcher Shop phone number : (972) 423-1848 J Ms Butcher Shop phone number : (865) 483-9228\n\n"
+  },
+  "prompt": "Answer the question based on given passages:\nQuestion: butcher shop phone number\nPassages: passage 1:Butcher Shop - Hayward 826 B Street, Hayward CA 94541 Phone Number: (510) 889-8690\n\npassage 2:Butcher Shop - Lakefield 212 Main Street, Lakefield MN 56150 Phone Number: (507) 662-6281\n\npassage 3:Some More Phone Numbers Related To The Butcher Shop The Local Butcher Shop phone number : (510) 845-6328 Boones Butcher Shop phone number : (502) 348-3668 Ye Ole Butcher Shop phone number : (972) 423-1848 J Ms Butcher Shop phone number : (865) 483-9228\n\n"
 }
 ```
 
@@ -389,3 +406,129 @@ Observed across all spans:
    - RAGTruth context is in a separate relational file (`source_info.jsonl`), joined by `source_id`.
    - HaluEval task subsets keep context inline: named `knowledge` for `qa` and `dialogue`, and `document` for `summarization`.
    - HaluEval `general` has no context at all, making it unsuitable for retrieval-grounded hallucination checks without external knowledge retrieval.
+
+
+---
+
+## 4. Label Semantics per Dataset
+
+### 4.1 RAGTruth Label Semantics
+- **Reference Publication:** Cheng Niu, Yuanhao Wu, Dian Jiao, et al., *"RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models"*, Proceedings of ACL 2024.
+- **Source Repository:** `https://github.com/ParticleMedia/RAGTruth`
+
+RAGTruth categorizes hallucination spans along two orthogonal axes:
+1. **Error Nature (Conflict vs. Baseless Information):**
+   - **Conflict:** The generated text contradicts facts or relations stated in the reference context.
+     > *Paper definition:* "A conflict hallucination occurs when the generated text contains factual statements that contradict the reference context."
+   - **Baseless Information:** The generated text introduces assertions or entities that are absent from or cannot be deduced from the reference context, even if they are plausible.
+     > *Paper definition:* "A baseless information hallucination occurs when the generated text introduces assertions or entities that are not mentioned in or cannot be substantiated by the reference context."
+2. **Error Salience (Evident vs. Subtle):**
+   - **Evident:** Glaring factual errors or clear extrapolations that are readily identifiable without intricate inference.
+     > *Paper definition:* "Evident hallucinations are obvious factual errors or fabricated details that can be clearly identified with minimal effort."
+   - **Subtle:** Fine-grained, nuanced discrepancies involving minor temporal shifts, subtle entity confusions, or slight misinterpretations of the source passages.
+     > *Paper definition:* "Subtle hallucinations are nuanced factual deviations, subtle entity confusions, or slight misinterpretations of the provided passages."
+
+#### Resulting 4 Label Types:
+1. `Evident Conflict`: Direct, unambiguous factual contradiction against the retrieved context passages (5,324 spans, 37.3% of all spans).
+2. `Subtle Conflict`: Nuanced, fine-grained contradiction against the context (201 spans, 1.4% of all spans).
+3. `Evident Baseless Info`: Blatant assertion of facts, entities, or claims completely absent from the context (6,237 spans, 43.6% of all spans).
+4. `Subtle Baseless Info`: Minor, nuanced details or unsupported elaborations not present in the context (2,527 spans, 17.7% of all spans).
+
+#### Span-Level Auxiliary Flags:
+- `implicit_true` (`bool`): Set to `True` when the hallucinated span, though ungrounded by the retrieved context, represents information that is true according to real-world knowledge (parametric memory intrusion).
+  > *Paper definition:* "implicit_true indicates that the hallucinated statement, while not grounded in the source passages, is actually true in the real world." (Observed in 1,928 spans).
+- `due_to_null` (`bool`): Set to `True` when a hallucinated detail in structured-to-text tasks is triggered because the source attribute had a missing or `null` value in the input dictionary.
+  > *Paper definition:* "due_to_null indicates that the hallucinated statement was triggered by a missing or null attribute in the structured table or context." (Observed in 1,642 spans; strictly confined to the Data2txt Yelp subset).
+
+---
+
+### 4.2 HaluEval Label Semantics
+- **Reference Publication:** Junyi Li, Xiaoxue Cheng, Wayne Xin Zhao, Jian-Yun Nie, Ji-Rong Wen, *"HaluEval: A Large-Scale Hallucination Evaluation Benchmark for Large Language Models"*, Proceedings of EMNLP 2023, pages 6449–6464.
+- **Source Repository:** `https://github.com/RUCAIBox/HaluEval`
+
+HaluEval defines hallucination as:
+> *Paper definition:* "Hallucination in our benchmark is defined as generated information that conflicts with the user query, provided context, or factual reality."
+
+#### 1. Task-Specific Subsets (`qa`, `dialogue`, `summarization`):
+These subsets present paired responses for each input:
+- `right_*` (`right_answer`, `right_response`, `right_summary`):
+  > *Paper definition:* "The ground-truth, factual response retrieved or validated from the benchmark dataset (HotpotQA, OpenDialKG, CNN/DailyMail)."
+- `hallucinated_*` (`hallucinated_answer`, `hallucinated_response`, `hallucinated_summary`):
+  > *Paper definition:* "A synthetically generated response produced by prompting ChatGPT with one-shot task instructions designed to inject realistic hallucinations (e.g., entity swapping, factual contradiction, and fabricated details) conditioned on the context."
+
+#### 2. Sampled Subsets (`qa_samples`, `dialogue_samples`, `summarization_samples`):
+These flatten the paired instances into single-response classification instances with a binary label:
+- `hallucination`:
+  - `"no"`: Corresponds directly to the factual `right_*` response (exactly 4,990 records, 49.9%).
+  - `"yes"`: Corresponds directly to the synthetic `hallucinated_*` response (exactly 5,010 records, 50.1%).
+
+#### 3. General Subset (`general`):
+Evaluates open-domain, closed-book ChatGPT generations on 4,507 diverse user prompts:
+- `hallucination`: Binary flag (`"no"` in 3,692 records / 81.92%; `"yes"` in 815 records / 18.08%).
+- `hallucination_spans`: Raw text substrings representing the inaccurate assertions extracted by human annotators.
+  > *Annotation rule:* Unverified / exact annotator prompt guidelines not detailed in the community repo; in 13 cases labeled `"yes"`, `hallucination_spans` is empty `[]`.
+
+---
+
+## 5. Gaps for RAGuard
+
+The table below audits the availability of pipeline inputs and evaluation labels across all datasets and subsets. Each element is categorized strictly as:
+- **PRESENT**: Directly available as an explicit field.
+- **DERIVABLE**: Can be unambiguously computed or extracted from available fields with standard deterministic logic.
+- **MISSING**: Completely absent from the dataset.
+
+| Dataset / Subset | User Query | Retrieval Context | Model Response | Response-Level Label | Span-Level Labels |
+|---|---|---|---|---|---|
+| **RAGTruth (QA)** | **PRESENT** (`source_info['question']`) | **PRESENT** (`source_info['passages']`) | **PRESENT** (`response`) | **DERIVABLE** (`len(labels) > 0`) | **PRESENT** (`start`, `end`, `label_type`) |
+| **RAGTruth (Summary)** | **DERIVABLE** (`prompt` task instruction) | **PRESENT** (`source_info` article text) | **PRESENT** (`response`) | **DERIVABLE** (`len(labels) > 0`) | **PRESENT** (`start`, `end`, `label_type`) |
+| **RAGTruth (Data2txt)** | **MISSING** (prompt template only) | **PRESENT** (`source_info` business dict) | **PRESENT** (`response`) | **DERIVABLE** (`len(labels) > 0`) | **PRESENT** (`start`, `end`, `label_type`) |
+| **HaluEval (`qa`)** | **PRESENT** (`question`) | **PRESENT** (`knowledge`) | **DERIVABLE** (`right_answer` & `hallucinated_answer`) | **DERIVABLE** (implicit binary from pair key) | **MISSING** |
+| **HaluEval (`qa_samples`)** | **PRESENT** (`question`) | **PRESENT** (`knowledge`) | **PRESENT** (`answer`) | **PRESENT** (`hallucination`: `"yes"`/`"no"`) | **MISSING** |
+| **HaluEval (`dialogue`)** | **DERIVABLE** (`dialogue_history` as query) | **PRESENT** (`knowledge`) | **DERIVABLE** (`right_response` & `hallucinated_response`) | **DERIVABLE** (implicit binary from pair key) | **MISSING** |
+| **HaluEval (`dialogue_samples`)** | **DERIVABLE** (`dialogue_history` as query) | **PRESENT** (`knowledge`) | **PRESENT** (`response`) | **PRESENT** (`hallucination`: `"yes"`/`"no"`) | **MISSING** |
+| **HaluEval (`summarization`)** | **MISSING** | **PRESENT** (`document`) | **DERIVABLE** (`right_summary` & `hallucinated_summary`) | **DERIVABLE** (implicit binary from pair key) | **MISSING** |
+| **HaluEval (`summarization_samples`)** | **MISSING** | **PRESENT** (`document`) | **PRESENT** (`summary`) | **PRESENT** (`hallucination`: `"yes"`/`"no"`) | **MISSING** |
+| **HaluEval (`general`)** | **PRESENT** (`user_query`) | **MISSING** | **PRESENT** (`chatgpt_response`) | **PRESENT** (`hallucination`: `"yes"`/`"no"`) | **DERIVABLE** (raw string list in `hallucination_spans`) |
+
+### Key Gap Takeaways for RAGuard Architecture:
+1. **Dynamic Retrieval Gap:** None of the public datasets provide a dynamic search index or query retrieval harness; contexts are static and fixed. To test RAGuard's action router (specifically the "Re-retrieve with reformulated query" path on Retrieval Misses), an external corpus index (such as MS MARCO or Wikipedia) must be paired with the evaluation benchmark.
+2. **Span Granularity Gap in HaluEval:** HaluEval task subsets lack span-level annotations entirely. Therefore, HaluEval can only evaluate end-to-end response-level classification and score fusion, whereas fine-grained claim-level decomposition and span verification must be benchmarked on RAGTruth.
+3. **Contextless General Subset:** HaluEval `general` has no retrieval context document, making NLI cross-encoder entailment and dense attribution inapplicable without an external retrieval engine. It can only be used to evaluate Signal C (Self-Consistency).
+
+---
+
+## 6. License and Usage Terms
+
+### 6.1 RAGTruth
+- **Source Repository:** `https://github.com/ParticleMedia/RAGTruth`
+- **Repository License:** **Not found** (no `LICENSE` file is included in the official GitHub repository root as of inspection).
+- **Underlying Provenance & Terms:**
+  - *MS MARCO (QA):* Microsoft Research License (strictly non-commercial research use).
+  - *CNN / DailyMail (Summary):* Apache 2.0 / non-commercial research.
+  - *Yelp Open Dataset (Data2txt):* Governed by the Yelp Dataset User Agreement, which strictly restricts use to non-commercial academic research and prohibits redistributing raw Yelp data without attribution.
+- **RAGuard Compliance:** Suitable for academic research, benchmarking, and peer-reviewed conference publications. Raw Yelp data must remain git-ignored (as enforced in `.gitignore`).
+
+### 6.2 HaluEval
+- **Original Publication:** Li et al., *"HaluEval: A Large-Scale Hallucination Evaluation Benchmark for Large Language Models"*, EMNLP 2023.
+- **Original Official Repository:** `https://github.com/RUCAIBox/HaluEval` (maintained by RUCAIBox, Renmin University of China).
+- **Original Repository License:** **MIT License** (per official `RUCAIBox/HaluEval` repository).
+- **Hugging Face Copy Used:** `pminervini/HaluEval` (hosted by Pasquale Minervini).
+  - *Is the HF copy official?* **No**. It is an unofficial community conversion to Hugging Face dataset format (Parquet/Arrow). The Hugging Face `dataset_info.json` metadata leaves the `license` field blank (`""`). However, the upstream content originates from the MIT-licensed RUCAIBox repository.
+- **Underlying Provenance & Terms:**
+  - *HotpotQA (`qa`):* Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).
+  - *OpenDialKG (`dialogue`):* Creative Commons Attribution 4.0 International (CC BY 4.0).
+  - *CNN / DailyMail (`summarization`):* Apache 2.0 / non-commercial research.
+- **RAGuard Compliance:** Fully compatible with open-source academic benchmarking and evaluation under MIT and CC BY-SA terms.
+
+---
+
+## 7. Open Questions
+
+1. **Validation Split Generation for RAGTruth:** RAGTruth provides only `train` (15,090) and `test` (2,700). Because RAGuard requires a validation split to calibrate fusion weights $(w_1, w_2, w_3)$ and detector thresholds $(\tau_E, \tau_M, \tau_C)$ without contaminating test results, how should `val` be carved out from `train`? Partitioning must occur strictly at the `source_id` level (e.g. 2,015 train sources / 500 val sources) to avoid multi-model data leakage.
+2. **Evaluation Split Standardization for HaluEval:** HaluEval provides only a single `data` split of 10,000 records per subset. A deterministic split protocol (e.g., 80% train, 10% val, 10% test) partitioned by unique context/query keys must be implemented in `eval/splits.py`.
+3. **Evaluating Corrective Action Routing on Static Datasets:** RAGuard's Action Router dispatches targeted corrective actions (re-retrieval, stricter prompt regeneration, resampled temperature 0, abstention). Since RAGTruth and HaluEval are static offline corpora, how should re-retrieval be evaluated? Options include:
+   - Indexing the underlying corpora (MS MARCO passages, HotpotQA documents) into BM25/FAISS to evaluate dynamic multi-hop retrieval.
+   - Using a mock retrieval environment that returns gold vs. distractor passages.
+4. **Claim Boundary vs. Character Span Alignment:** RAGTruth annotations provide exact character spans ($[start, end]$), whereas RAGuard decomposes responses into atomic sentence claims via spaCy. How should claim verification be mapped to character spans? We must define a threshold (e.g., character IoU $\ge 0.5$ or token containment) to designate whether a claim is considered an annotated hallucination.
+5. **Linearization of Structured Data2txt Contexts:** RAGTruth Data2txt context is a serialized JSON dictionary of business attributes and reviews. Pretrained NLI cross-encoders (e.g. `roberta-large-snli_mnli_fever_anli_r1_r2_r3` or `deberta-v3-large`) are pretrained on natural prose premises, not raw JSON. Will unlinearized JSON cause domain degradation, and should a lightweight serializer/verbalizer be introduced?
+6. **Redundancy Between Paired and Sampled HaluEval:** Since `qa_samples`, `dialogue_samples`, and `summarization_samples` are exact 50/50 balanced subsets of the paired datasets, benchmarking on both is redundant. The pipeline should use `*_samples` for binary classification metrics (F1, PR-AUC, ROC-AUC) and paired datasets for candidate ranking or preference tests.
