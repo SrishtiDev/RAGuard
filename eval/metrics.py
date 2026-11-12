@@ -3,7 +3,8 @@ eval/metrics.py
 ---------------
 Evaluation metrics for hallucination detection with positive class = hallucinated (1).
 Includes ranking metrics (ROC-AUC, PR-AUC), threshold metrics (confusion matrix, F1, precision, recall),
-threshold tuning guard, grouped bootstrap confidence intervals, and subset/model breakdowns.
+threshold tuning guard, grouped bootstrap confidence intervals, subset/model breakdowns,
+and Section 6 additions: f1_all_positive baseline, precision_at_recall, f1_delta_over_all_positive.
 """
 
 from __future__ import annotations
@@ -324,8 +325,15 @@ def compute_all_metrics(
         pr_ci = grouped_bootstrap_ci(_ap_fn, y_scores, y_true, groups, n=n_bootstrap, seed=seed)
         f1_ci = grouped_bootstrap_ci(_f1_fn, y_scores, y_true, groups, n=n_bootstrap, seed=seed)
 
+    # Section 6: f1_all_positive baseline and precision_at_recall
+    prevalence = ranking["prevalence"]
+    f1_floor = f1_all_positive(prevalence)
+    f1_val = thresh_metrics["f1"]
+    f1_delta = f1_delta_over_all_positive(f1_val, prevalence)
+    prec_at_recalls = compute_precision_at_recalls(y_scores, y_true, targets=(0.8, 0.9))
+
     return {
-        "prevalence": ranking["prevalence"],
+        "prevalence": prevalence,
         "roc_auc": ranking["roc_auc"],
         "roc_auc_ci_95": roc_ci,
         "average_precision": ranking["average_precision"],
@@ -336,8 +344,11 @@ def compute_all_metrics(
         "accuracy": thresh_metrics["accuracy"],
         "precision": thresh_metrics["precision"],
         "recall": thresh_metrics["recall"],
-        "f1": thresh_metrics["f1"],
+        "f1": f1_val,
         "f1_ci_95": f1_ci,
+        "f1_all_positive_floor": f1_floor,
+        "f1_delta_over_all_positive": f1_delta,
+        **prec_at_recalls,
         "flags": {**ranking.get("flags", {}), **thresh_metrics.get("flags", {})},
     }
 
@@ -379,5 +390,110 @@ def compute_breakdowns(
     return {
         "by_subset": {k: _eval_records(v) for k, v in sorted(by_subset_records.items())},
         "by_model": {k: _eval_records(v) for k, v in sorted(by_model_records.items())},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Section 6 additions
+# ---------------------------------------------------------------------------
+
+def f1_all_positive(prevalence: float) -> Optional[float]:
+    """
+    F1 score of a hypothetical detector that labels everything as positive (hallucinated).
+
+    Formula: 2p / (1 + p)  where p = prevalence.
+
+    This is the floor that any useful detector must beat on F1.
+    Returns None if prevalence is out of [0, 1].
+    """
+    if prevalence < 0.0 or prevalence > 1.0:
+        return None
+    if prevalence == 0.0:
+        return 0.0
+    return 2.0 * prevalence / (1.0 + prevalence)
+
+
+def precision_at_recall(
+    scores: Sequence[float],
+    labels: Sequence[Any],
+    target_recall: float,
+) -> Optional[float]:
+    """
+    Find the highest precision achievable at or above *target_recall*.
+
+    Scans thresholds (from low to high score, increasing threshold) and returns
+    the precision at the first threshold where recall >= target_recall.
+
+    Parameters
+    ----------
+    scores : Sequence[float]
+        Detector scores.
+    labels : Sequence[Any]
+        Binary labels (1 = positive/hallucinated).
+    target_recall : float
+        Minimum recall required (e.g. 0.8 or 0.9).
+
+    Returns
+    -------
+    Optional[float]
+        Precision at the threshold giving >= target_recall, or None if unachievable
+        (e.g. single-class labels, no thresholds meet the target).
+    """
+    y_scores = np.asarray(scores, dtype=float)
+    y_true = np.asarray(labels, dtype=int)
+
+    if len(y_true) == 0 or len(np.unique(y_true)) < 2:
+        return None
+
+    n_pos = int(np.sum(y_true == 1))
+    if n_pos == 0:
+        return None
+
+    # Sort by ascending threshold (high score = positive prediction)
+    # We want the highest precision where recall >= target_recall.
+    # Try all candidate thresholds.
+    unique_thresholds = np.sort(np.unique(y_scores))
+    best_precision: Optional[float] = None
+
+    for thresh in unique_thresholds:
+        y_pred = (y_scores >= thresh).astype(int)
+        tp = int(np.sum((y_pred == 1) & (y_true == 1)))
+        fp = int(np.sum((y_pred == 1) & (y_true == 0)))
+        recall = tp / n_pos
+        if recall >= target_recall:
+            denom = tp + fp
+            prec = float(tp / denom) if denom > 0 else None
+            if prec is not None:
+                if best_precision is None or prec > best_precision:
+                    best_precision = prec
+
+    return best_precision
+
+
+def f1_delta_over_all_positive(f1: Optional[float], prevalence: float) -> Optional[float]:
+    """
+    Compute F1 delta relative to the all-positive baseline.
+
+    Returns f1 - f1_all_positive(prevalence), or None if either is None.
+    """
+    floor = f1_all_positive(prevalence)
+    if f1 is None or floor is None:
+        return None
+    return f1 - floor
+
+
+def compute_precision_at_recalls(
+    scores: Sequence[float],
+    labels: Sequence[Any],
+    targets: tuple[float, ...] = (0.8, 0.9),
+) -> dict[str, Optional[float]]:
+    """
+    Compute precision_at_recall for each target in *targets*.
+
+    Returns a dict keyed as "precision_at_recall_0.80" etc.
+    """
+    return {
+        f"precision_at_recall_{t:.2f}": precision_at_recall(scores, labels, t)
+        for t in targets
     }
 
