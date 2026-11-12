@@ -161,3 +161,116 @@ def test_compute_breakdowns():
     assert bd["by_subset"]["QA"]["accuracy"] == 1.0
     assert bd["by_model"]["test-model-1"]["accuracy"] == 1.0
 
+
+
+# ---------------------------------------------------------------------------
+# Section 6 additions: f1_all_positive, precision_at_recall, f1_delta
+# ---------------------------------------------------------------------------
+
+import pytest
+from eval.metrics import (
+    f1_all_positive,
+    precision_at_recall,
+    f1_delta_over_all_positive,
+    compute_precision_at_recalls,
+)
+
+
+def test_f1_all_positive_known_values():
+    """f1_all_positive(p) = 2p / (1 + p)."""
+    # prevalence = 0.5 -> F1 = 2*0.5 / 1.5 = 2/3
+    result = f1_all_positive(0.5)
+    assert abs(result - 2 / 3) < 1e-9
+
+    # prevalence = 1.0 -> F1 = 2 / 2 = 1.0
+    assert abs(f1_all_positive(1.0) - 1.0) < 1e-9
+
+    # prevalence = 0.0 -> F1 = 0.0
+    assert f1_all_positive(0.0) == 0.0
+
+    # prevalence = 0.3140 (RAGTruth val)
+    p = 0.3140
+    expected = 2 * p / (1 + p)
+    assert abs(f1_all_positive(p) - expected) < 1e-9
+
+
+def test_f1_all_positive_out_of_range():
+    assert f1_all_positive(-0.1) is None
+    assert f1_all_positive(1.1) is None
+
+
+def test_precision_at_recall_perfect_scores():
+    """Perfect scores -> precision at any recall target is 1.0."""
+    scores = [1.0, 1.0, 0.0, 0.0]
+    labels = [1,   1,   0,   0]
+    result = precision_at_recall(scores, labels, target_recall=1.0)
+    assert result is not None
+    assert abs(result - 1.0) < 1e-9
+
+
+def test_precision_at_recall_target_80():
+    """Hand-computed: threshold that gives recall >= 0.8."""
+    # 5 positives, 5 negatives; sorted by score descending
+    scores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0]
+    labels = [1,   1,   1,   1,   1,   0,   0,   0,   0,   0  ]
+    # At threshold=0.1: recall = 5/5 = 1.0, precision = 5/10 = 0.5
+    # At threshold=0.5: recall = 5/5 = 1.0, precision = 5/5 = 1.0
+    # At threshold=0.6: recall = 4/5 = 0.8, precision = 4/4 = 1.0
+    # Best precision at recall >= 0.8 = 1.0
+    result = precision_at_recall(scores, labels, target_recall=0.8)
+    assert result is not None
+    assert abs(result - 1.0) < 1e-9
+
+
+def test_precision_at_recall_target_90_unachievable():
+    """If only 80% recall is reachable before precision collapses, target 0.9 may still work."""
+    scores = [1.0, 0.0, 0.0, 0.0, 0.0]
+    labels = [1,   1,   1,   0,   0  ]
+    # recall at score >= 0.0: recall=3/3=1.0, precision=3/5=0.6
+    # We achieve recall=1.0, so target 0.9 is achievable
+    result = precision_at_recall(scores, labels, target_recall=0.9)
+    assert result is not None
+
+
+def test_precision_at_recall_single_class_returns_none():
+    scores = [0.9, 0.5, 0.1]
+    labels = [0, 0, 0]
+    result = precision_at_recall(scores, labels, target_recall=0.8)
+    assert result is None
+
+
+def test_f1_delta_over_all_positive():
+    """f1_delta = f1 - f1_all_positive(prevalence)."""
+    prevalence = 0.5
+    floor = f1_all_positive(prevalence)  # 2/3 ~ 0.6667
+    # Suppose model F1 = 0.75
+    delta = f1_delta_over_all_positive(0.75, prevalence)
+    assert delta is not None
+    assert abs(delta - (0.75 - floor)) < 1e-9
+
+
+def test_f1_delta_none_when_f1_is_none():
+    assert f1_delta_over_all_positive(None, 0.5) is None
+
+
+def test_compute_precision_at_recalls_keys():
+    scores = [0.9, 0.1]
+    labels = [1, 0]
+    result = compute_precision_at_recalls(scores, labels, targets=(0.8, 0.9))
+    assert "precision_at_recall_0.80" in result
+    assert "precision_at_recall_0.90" in result
+
+
+def test_compute_all_metrics_includes_new_fields():
+    """compute_all_metrics must include f1_all_positive_floor, f1_delta, and precision_at_recall keys."""
+    from eval.metrics import compute_all_metrics
+    scores = [0.9, 0.8, 0.1, 0.1]
+    labels = [1,   1,   0,   0  ]
+    result = compute_all_metrics(scores, labels, split_name="val")
+    assert "f1_all_positive_floor" in result
+    assert "f1_delta_over_all_positive" in result
+    assert "precision_at_recall_0.80" in result
+    assert "precision_at_recall_0.90" in result
+    # Sanity: floor should be less than 1 for prevalence 0.5
+    assert result["f1_all_positive_floor"] is not None
+    assert result["f1_all_positive_floor"] < 1.0
