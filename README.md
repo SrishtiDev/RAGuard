@@ -315,8 +315,8 @@ Components are classified strictly according to current repository state (execut
 | **API layer** | **Not started** | Placeholder exists (`api/main.py`); service endpoints not implemented |
 | **Retrieval** | **Not started** | Placeholders exist in `retrieval/` (`bm25.py`, `dense.py`, `retriever.py`, `rrf.py`) |
 | **Generation** | **Not started** | Placeholders exist in `generation/` (`llm_client.py`, `prompts.py`) |
-| **Claims** | **Not started** | Placeholder exists (`claims/splitter.py`); claim segmentation not implemented |
-| **Detectors** | **Not started** | Placeholders exist in `detectors/` (`attribution.py`, `base.py`, `consistency.py`, `nli.py`) |
+| **Claims** | **Done** | Rule-based claim splitter using spaCy English sentencizer (`claims/splitter.py`) |
+| **Detectors** | **In progress** | Base interface, dummy baselines, and NLI entailment detector (`detectors/nli.py`) |
 | **Fusion** | **Not started** | Placeholder exists (`fusion/fusion.py`); score aggregation not implemented |
 | **Router** | **Not started** | Placeholders exist in `router/` (`diagnosis.py`, `router.py`) |
 | **Eval** | **Not started** | Placeholders exist in `eval/` (`datasets.py`, `harness.py`, `logger.py`, `metrics.py`, `splits.py`) |

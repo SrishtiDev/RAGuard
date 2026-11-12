@@ -4,6 +4,13 @@ eval/harness.py
 Evaluation execution harness for hallucination detectors.
 Manages evaluation runs, threshold resolution, metric computation, split verification,
 and artifact logging to runs/<timestamp>_<detector>_<split>/.
+
+New in Step 6:
+- --detector nli with --aggregation {max,mean,noisy_or}
+- --limit N (stratified sample by task_type, grouped by source_id, seed 42)
+- --show-errors K (val QA only: highest-risk non-hallucinated and lowest-risk hallucinated)
+- NLI config fields in config.json: model_name, batch_size, window params, aggregation,
+  device, truncation_rate, cache_hit_rate
 """
 
 from __future__ import annotations
@@ -11,7 +18,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import random
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
@@ -75,6 +84,55 @@ def load_and_verify_split_ids(
     return ids, computed_sha
 
 
+def _stratified_limit_by_source_id(
+    examples: list[Example],
+    limit: int,
+    seed: int = 42,
+) -> list[Example]:
+    """
+    Stratified sample of *limit* examples, grouped by source_id and stratified by task_type.
+    All responses for a sampled source_id are included.
+    """
+    # Group source_ids by task_type
+    task_sources: dict[str, list[str]] = defaultdict(list)
+    source_to_examples: dict[str, list[Example]] = defaultdict(list)
+
+    for ex in examples:
+        task_sources[ex.subset].append(ex.group_id)
+        source_to_examples[ex.group_id].append(ex)
+
+    # Deduplicate source_ids per task_type
+    task_unique_sources: dict[str, list[str]] = {
+        t: list(dict.fromkeys(sids)) for t, sids in task_sources.items()
+    }
+
+    total_sources = sum(len(v) for v in task_unique_sources.values())
+    if total_sources == 0:
+        return []
+
+    rng = random.Random(seed)
+    selected: list[Example] = []
+    seen_sources: set[str] = set()
+
+    # Interleave sources from each task_type proportionally
+    task_names = sorted(task_unique_sources.keys())
+    task_pools = {t: list(task_unique_sources[t]) for t in task_names}
+    for pool in task_pools.values():
+        rng.shuffle(pool)
+
+    # Round-robin across task types until limit reached
+    while sum(len(v) for v in task_pools.values()) > 0 and len(selected) < limit:
+        for t in task_names:
+            if not task_pools[t] or len(selected) >= limit:
+                continue
+            src = task_pools[t].pop(0)
+            if src not in seen_sources:
+                seen_sources.add(src)
+                selected.extend(source_to_examples[src])
+
+    return selected[:limit] if len(selected) > limit else selected
+
+
 def format_console_summary(summary: dict[str, Any]) -> str:
     """Format a human-readable console summary string."""
     m = summary["metrics"]
@@ -106,6 +164,10 @@ def format_console_summary(summary: dict[str, Any]) -> str:
         f"Precision             : {_fmt(m.get('precision'))}",
         f"Recall                : {_fmt(m.get('recall'))}",
         f"F1 Score              : {_fmt(m.get('f1'))} (95% CI: {_fmt_ci(f1_ci)})",
+        f"F1 All-Positive Floor : {_fmt(m.get('f1_all_positive_floor'))}",
+        f"F1 Delta over Floor   : {_fmt(m.get('f1_delta_over_all_positive'))}",
+        f"Prec@Recall=0.80      : {_fmt(m.get('precision_at_recall_0.80'))}",
+        f"Prec@Recall=0.90      : {_fmt(m.get('precision_at_recall_0.90'))}",
         f"Confusion Matrix      : TP={cm.get('tp')}, FP={cm.get('fp')}, FN={cm.get('fn')}, TN={cm.get('tn')}",
         "-" * 70,
         f"Latency per predict() : Mean={summary['latency']['mean_ms']:.3f} ms | p95={summary['latency']['p95_ms']:.3f} ms",
@@ -131,6 +193,62 @@ def format_console_summary(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_show_errors(
+    examples: Sequence[Example],
+    predictions: list[dict[str, Any]],
+    k: int,
+    threshold: float,
+) -> str:
+    """
+    Format --show-errors output for val QA only.
+    Prints K highest-risk non-hallucinated and K lowest-risk hallucinated examples.
+    Per-claim text is truncated to 150 chars.
+    """
+    # Build id -> example map
+    ex_map = {ex.id: ex for ex in examples}
+
+    qa_preds = [p for p in predictions if p.get("subset") == "QA"]
+    not_hallucinated = [p for p in qa_preds if not p["label"]]
+    hallucinated = [p for p in qa_preds if p["label"]]
+
+    high_risk_non_hal = sorted(not_hallucinated, key=lambda p: p["score"], reverse=True)[:k]
+    low_risk_hal = sorted(hallucinated, key=lambda p: p["score"])[:k]
+
+    lines = [
+        "=" * 70,
+        f"  SHOW-ERRORS (val QA, K={k})",
+        "=" * 70,
+        f"\n--- TOP-{k} HIGHEST-RISK NON-HALLUCINATED (false positives at threshold {threshold:.4f}) ---",
+    ]
+
+    def _format_entry(p: dict[str, Any], kind: str) -> list[str]:
+        ex = ex_map.get(p["id"])
+        entry_lines = [
+            f"\n[{kind}] ID={p['id']} | score={p['score']:.4f} | label={p['label']} | model={p['model']}",
+        ]
+        if ex is not None:
+            # Per-claim info from detector metadata (stored in prediction metadata if available)
+            # We re-call nothing — just show spans from the Example
+            for i, span in enumerate(ex.spans):
+                trunc_text = span.text[:150] + ("..." if len(span.text) > 150 else "")
+                entry_lines.append(
+                    f"  Span {i+1}: label_type={span.label_type!r} | {trunc_text!r}"
+                )
+            if not ex.spans:
+                entry_lines.append("  (no annotated spans)")
+        return entry_lines
+
+    for p in high_risk_non_hal:
+        lines.extend(_format_entry(p, "HIGH-RISK NON-HAL"))
+
+    lines.append(f"\n--- TOP-{k} LOWEST-RISK HALLUCINATED (false negatives at threshold {threshold:.4f}) ---")
+    for p in low_risk_hal:
+        lines.extend(_format_entry(p, "LOW-RISK HAL"))
+
+    lines.append("=" * 70)
+    return "\n".join(lines)
+
+
 def run(
     detector: Detector,
     examples: Sequence[Example],
@@ -139,6 +257,8 @@ def run(
     split_sha256: Optional[str] = None,
     seed: int = 42,
     output_dir: Optional[Union[str, Path]] = "runs",
+    extra_config: Optional[dict[str, Any]] = None,
+    show_errors_k: Optional[int] = None,
 ) -> dict[str, Any]:
     """
     Execute detector evaluation across examples and log artifacts.
@@ -222,7 +342,7 @@ def run(
     }
 
     commit, is_dirty = get_git_info()
-    config = {
+    config: dict[str, Any] = {
         "detector": detector.name,
         "split": clean_split,
         "threshold": float(threshold),
@@ -232,6 +352,8 @@ def run(
         "git_dirty": is_dirty,
         "versions": get_environment_versions(),
     }
+    if extra_config:
+        config.update(extra_config)
 
     if output_dir is not None:
         run_dir = create_run_dir(
@@ -245,6 +367,16 @@ def run(
     console_output = format_console_summary(summary)
     print(console_output)
 
+    # --show-errors (console only, never saved)
+    if show_errors_k is not None and clean_split == "val":
+        errors_output = _format_show_errors(
+            examples=examples,
+            predictions=predictions,
+            k=show_errors_k,
+            threshold=threshold,
+        )
+        print(errors_output)
+
     return summary
 
 
@@ -254,7 +386,7 @@ def main(args_list: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--detector",
         required=True,
-        choices=["always", "never", "random", "length"],
+        choices=["always", "never", "random", "length", "nli"],
         help="Detector to evaluate.",
     )
     parser.add_argument(
@@ -296,17 +428,56 @@ def main(args_list: Optional[Sequence[str]] = None) -> int:
         default=42,
         help="Random seed for detector and bootstrap CI.",
     )
+    # NLI-specific flags
+    parser.add_argument(
+        "--aggregation",
+        default="max",
+        choices=["max", "mean", "noisy_or"],
+        help="NLI score aggregation mode (default: max).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="NLI inference batch size (default: 32).",
+    )
+    parser.add_argument(
+        "--window-words",
+        type=int,
+        default=180,
+        help="Context window size in words (default: 180).",
+    )
+    parser.add_argument(
+        "--stride-words",
+        type=int,
+        default=90,
+        help="Context window stride in words (default: 90).",
+    )
+    # General new flags
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit N examples (stratified by task_type, grouped by source_id, seed 42).",
+    )
+    parser.add_argument(
+        "--show-errors",
+        type=int,
+        default=None,
+        dest="show_errors",
+        metavar="K",
+        help="Show K highest-risk non-hallucinated and K lowest-risk hallucinated (val QA only, console only).",
+    )
 
     args = parser.parse_args(args_list)
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     # Resolve threshold
     threshold = args.threshold
     if args.threshold_from:
         threshold = load_run_threshold(args.threshold_from)
         logger.info("Loaded threshold %f from %s", threshold, args.threshold_from)
-
-    # Instantiate detector
-    detector = get_dummy_detector(args.detector, seed=args.seed)
 
     # Verify and load split IDs
     split_ids, split_sha = load_and_verify_split_ids(args.splits_dir, args.split)
@@ -323,7 +494,42 @@ def main(args_list: Optional[Sequence[str]] = None) -> int:
             len(split_ids),
         )
 
-    run(
+    # Apply --limit
+    if args.limit is not None and args.limit < len(split_examples):
+        split_examples = _stratified_limit_by_source_id(split_examples, args.limit, seed=42)
+        logger.info("Applied --limit %d: using %d examples", args.limit, len(split_examples))
+
+    # Instantiate detector + build extra_config
+    extra_config: dict[str, Any] = {}
+    if args.detector == "nli":
+        from detectors.nli import load_nli_detector
+        from eval.cache import open_cache
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        model_name = os.environ.get("NLI_MODEL", "").strip()
+        if not model_name:
+            print("ERROR: NLI_MODEL is not set in environment / .env file.")
+            return 1
+        cache = open_cache(model_name)
+        detector = load_nli_detector(
+            aggregation=args.aggregation,
+            window_words=args.window_words,
+            stride_words=args.stride_words,
+            batch_size=args.batch_size,
+            cache=cache,
+        )
+        extra_config = {
+            "model_name": model_name,
+            "aggregation": args.aggregation,
+            "batch_size": args.batch_size,
+            "window_words": args.window_words,
+            "stride_words": args.stride_words,
+        }
+    else:
+        detector = get_dummy_detector(args.detector, seed=args.seed)
+
+    summary = run(
         detector=detector,
         examples=split_examples,
         split_name=args.split,
@@ -331,11 +537,27 @@ def main(args_list: Optional[Sequence[str]] = None) -> int:
         split_sha256=split_sha,
         seed=args.seed,
         output_dir=args.output_dir,
+        extra_config=extra_config,
+        show_errors_k=args.show_errors,
     )
+
+    # For NLI: add truncation_rate and cache_hit_rate to run config post-hoc
+    if args.detector == "nli" and "run_dir" in summary:
+        from detectors.nli import NLIDetector
+        if isinstance(detector, NLIDetector):
+            run_dir = Path(summary["run_dir"])
+            config_file = run_dir / "config.json"
+            if config_file.exists():
+                with open(config_file) as f:
+                    cfg = json.load(f)
+                cfg["truncation_rate"] = detector.truncation_rate
+                cfg["cache_hit_rate"] = cache.hit_rate
+                with open(config_file, "w") as f:
+                    json.dump(cfg, f, indent=2)
+
     return 0
 
 
 if __name__ == "__main__":
     import sys
     sys.exit(main())
-
