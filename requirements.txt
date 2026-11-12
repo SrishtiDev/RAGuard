@@ -6,3 +6,6 @@ datasets
 pandas
 numpy
 scikit-learn
+torch
+transformers
+spacy
