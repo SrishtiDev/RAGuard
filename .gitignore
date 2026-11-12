@@ -16,6 +16,9 @@ data/processed/*
 !data/processed/splits/
 !data/processed/splits/**
 
+# NLI inference cache (SQLite DBs contain only hashes, but are large and ephemeral)
+data/processed/cache/
+
 # Run artifacts (keep .gitkeep, ignore everything else)
 runs/*
 !runs/.gitkeep
